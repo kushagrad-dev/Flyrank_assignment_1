@@ -1,5 +1,7 @@
 const express =require('express');
 const app = express();
+app.use(express.json());
+
 app.get('/',(req,res) =>{
     res.json({name: 'Task API' , version: '1.0' , endpoints: ['/tasks']});
 });
@@ -24,5 +26,16 @@ app.get('/tasks/:id',(req,res) =>{
     res.json(task);
 });
 
+let nextId = 4;
+
+app.post('/tasks', (req ,res) =>{
+    const { title } = req.body;
+    if(!title || title.trim() === ''){
+        return res.status(400).json({ error: 'Title is required' });
+    }
+    const newTask = { id: nextId++, title, done: false};
+    tasks.push(newTask);
+    res.status(201).json(newTask);
+});
 
 app.listen(3000, () => console.log('Server on :3000'));
