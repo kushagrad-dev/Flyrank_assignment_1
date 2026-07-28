@@ -1,6 +1,12 @@
 const express =require('express');
 const app = express();
+
 app.use(express.json());
+
+const swaggerUi = require('swagger-ui-express');
+const openapiDoc = require('./openapi.json');
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiDoc));
+
 
 app.get('/',(req,res) =>{
     res.json({name: 'Task API' , version: '1.0' , endpoints: ['/tasks']});
@@ -55,7 +61,7 @@ app.put('/tasks/:id' , (req,res) => {
     res.json(task);
 });
 
-app.delete('tasks/:id',(req,res) =>{
+app.delete('/tasks/:id',(req,res) =>{
     const index = tasks.findIndex(t => t.id === parseInt(req.params.id));
     if(index === -1){
         return res.status(404).json({ error: `Task ${req.params.id} not found`});
