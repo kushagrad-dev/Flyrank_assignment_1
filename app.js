@@ -19,9 +19,10 @@ app.get('/tasks', (req,res)=> {
 app.get('/tasks/:id',(req,res) =>{
     const task = tasks.find(t => t.id === parseInt(req.params.id));
     if(!task){
-        return res.status(404).json({error: `Task ${req.params.id} not ` })
+        return res.status(404).json({error: `Task ${req.params.id} not found ` });
     }
-})
+    res.json(task);
+});
 
 
 app.listen(3000, () => console.log('Server on :3000'));
