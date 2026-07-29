@@ -46,16 +46,18 @@ app.get('/tasks/:id', (req, res) => {
   res.json(task);
 });
 
-let nextId = 4;
+app.post('/tasks', (req, res) => {
+  const { title } = req.body;
 
-app.post('/tasks', (req ,res) =>{
-    const { title } = req.body;
-    if(!title || title.trim() === ''){
-        return res.status(400).json({ error: 'Title is required' });
-    }
-    const newTask = { id: nextId++, title, done: false};
-    tasks.push(newTask);
-    res.status(201).json(newTask);
+  if (!title || title.trim() === '') {
+    return res.status(400).json({ error: 'Title is required' });
+  }
+
+  const insert = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
+  const result = insert.run(title, 0);
+
+  const newTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json(newTask);
 });
 
 app.put('/tasks/:id' , (req,res) => {
