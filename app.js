@@ -33,15 +33,17 @@ let tasks = [
     {id: 3, title: 'Deploy', done: false}
 ];
 
-app.get('/tasks', (req,res)=> {
-    res.json(tasks);
-})
-app.get('/tasks/:id',(req,res) =>{
-    const task = tasks.find(t => t.id === parseInt(req.params.id));
-    if(!task){
-        return res.status(404).json({error: `Task ${req.params.id} not found ` });
-    }
-    res.json(task);
+app.get('/tasks', (req, res) => {
+  const tasks = db.prepare('SELECT * FROM tasks').all();
+  res.json(tasks);
+});
+
+app.get('/tasks/:id', (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) {
+    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+  }
+  res.json(task);
 });
 
 let nextId = 4;
