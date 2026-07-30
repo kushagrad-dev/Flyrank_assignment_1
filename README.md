@@ -1,4 +1,4 @@
-# Flyrank_assignment_1
+# Flyrank_assignments
 
 A simple CRUD API for managing a to-do list, built with Node.js and Express as part of the FlyRank Backend Internship, Week 2.
 
@@ -89,4 +89,39 @@ The AI generated Swagger docs directly from code comments using `swagger-jsdoc`,
 ### One rematch
 
 If I ran this again, I'd add: "use `error` as the JSON key for all error responses" and "seed the task list with 3 example tasks on startup." That would close both gaps I found.
+
+
+
+
+
+## Database (Week 3)
+
+### Why SQLite
+
+SQLite was chosen because it's a single file with zero setup — no server to install or configure. It's perfect for this stage of the project because data now survives a server restart, while still being simple enough to open and inspect directly.
+
+### Where the database lives
+
+The database is a file called `tasks.db`, created automatically the first time the server runs. It's git-ignored, so each fresh clone starts with an empty file that gets recreated (with the table and 3 seed tasks) on first run — no manual setup required.
+
+### How to run
+
+```bash
+npm install
+npm start
+```
+
+The server creates `tasks.db` automatically if it doesn't exist, along with the `tasks` table and 3 example tasks (only seeded once — restarting does not duplicate them).
+
+### Example SQL query
+
+```sql
+DELETE FROM tasks WHERE done = 1;
+```
+
+Run in DB Browser after marking every task done with `UPDATE tasks SET done = 1;`, this query removed all 3 seeded tasks — and calling `GET /tasks` immediately afterward (no restart) showed the empty result, proving the API and DB Browser read the exact same file.
+
+### DB Browser screenshot
+
+
 
