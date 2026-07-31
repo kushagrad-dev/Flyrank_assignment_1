@@ -121,8 +121,6 @@ DELETE FROM tasks WHERE done = 1;
 
 Run in DB Browser after marking every task done with `UPDATE tasks SET done = 1;`, this query removed all 3 seeded tasks — and calling `GET /tasks` immediately afterward (no restart) showed the empty result, proving the API and DB Browser read the exact same file.
 
-### DB Browser screenshot
-
 
 
 ## AI vs Me — Database Migration (Stage 6)
