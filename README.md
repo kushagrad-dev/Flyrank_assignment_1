@@ -125,3 +125,32 @@ Run in DB Browser after marking every task done with `UPDATE tasks SET done = 1;
 
 
 
+## AI vs Me — Database Migration (Stage 6)
+
+### My prompt
+
+Take an existing CRUD API (built with Node.js and Express) that currently stores tasks in memory, and migrate it to use a SQLite database instead — so the data survives a server restart.
+
+Create a `tasks` table with three columns: id (a number, auto-assigned by the database), title (text, required, can't be empty), and done (stored as 0 or 1 instead of true/false).
+
+Only insert 3 example tasks when the table is completely empty (0 rows) — if it already has data, don't insert them again, so restarting the server never duplicates the seed data.
+
+Keep the same 5 endpoints with identical behavior to the in-memory version:
+- GET /tasks — list all tasks
+- GET /tasks/:id — get one task by id, 404 if not found
+- POST /tasks — create a task, 400 if title is missing/empty, 201 on success
+- PUT /tasks/:id — update a task, 404 if not found, 400 if title is empty
+- DELETE /tasks/:id — delete a task, 404 if not found, 204 on success
+
+Use parameterized queries (the `?` placeholder) for every query — never insert user input directly into the SQL string, to prevent SQL injection.
+
+### What the AI did better
+
+- It added `CHECK` constraints directly in the table schema (`CHECK(trim(title) <> '')` and `CHECK(done IN (0,1))`), enforcing data rules at the database level itself, not just in my route code.
+- Its DELETE route skips an extra SELECT — it just runs the DELETE and checks `result.changes === 0` to detect a missing id, one fewer query than my approach.
+- It trims the title before inserting (`title.trim()`), so extra whitespace never gets saved — I never did this in my own version.
+
+### What it got wrong or quietly decided for me
+
+- It seeded different example task names ("Learn Express", "Build REST API", "Practice SQLite") than mine ("Learn CRUD", "Build API", "Deploy") — I never specified the actual task text.
+- It seeded one task as already done (`done: 1`) — I never specified whether seed data should start as done or not
