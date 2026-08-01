@@ -27,11 +27,6 @@ app.get('/health',(req,res) =>{
     res.json({status: 'ok'});
 })
 
-let tasks = [
-    {id: 1,title: 'Learn CRUD' , done: false},
-    {id: 2,title: 'Build API', done: false},
-    {id: 3, title: 'Deploy', done: false}
-];
 
 app.get('/tasks', (req, res) => {
   const tasks = db.prepare('SELECT * FROM tasks').all();
