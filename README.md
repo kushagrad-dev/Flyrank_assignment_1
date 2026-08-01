@@ -152,3 +152,45 @@ Use parameterized queries (the `?` placeholder) for every query — never insert
 
 - It seeded different example task names ("Learn Express", "Build REST API", "Practice SQLite") than mine ("Learn CRUD", "Build API", "Deploy") — I never specified the actual task text.
 - It seeded one task as already done (`done: 1`) — I never specified whether seed data should start as done or not
+
+
+## Containerized Database (Week 1 - A3)
+
+### Why Postgres in Docker
+
+PostgreSQL is the same database engine used by a huge share of real production backends. Running it in Docker means no manual installation, no version conflicts, and the exact same setup works identically on any machine — solving "it works on my machine" for good.
+
+### One command to run everything
+
+```bash
+cp .env.example .env
+docker compose up
+```
+
+This builds the app image, starts a Postgres container, and connects them automatically. The `tasks` table and 3 example tasks are created on first run.
+
+### Environment variables
+
+See `.env.example` for the required variable:
+
+DATABASE_URL=postgres://postgres:dev@localhost:5432/tasks
+
+(Inside Docker Compose, the app automatically uses `db` instead of `localhost` as the hostname — this is set directly in `compose.yaml`.)
+
+### Example request
+
+```bash
+curl -i -X POST http://localhost:3000/tasks -H "Content-Type: application/json" -d '{"title":"Buy milk"}'
+```
+
+HTTP/1.1 201 Created
+...
+{"id":4,"title":"Buy milk","done":false}
+
+### Database screenshot
+
+![alt text](image-1.png)
+
+### Persistence
+
+Data survives a full `docker compose down` and `docker compose up` because Postgres's data directory is mounted to a named Docker volume (`taskdata`), which lives outside the containers themselves.
