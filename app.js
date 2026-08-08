@@ -2,12 +2,21 @@ require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 
 const app = express();
 app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY,
+  {
+    realtime: {
+      transport: ws
+    }
+  }
+);
 
 const swaggerUi = require('swagger-ui-express');
 const openapiDoc = require('./openapi.json');
@@ -38,6 +47,54 @@ app.get('/', (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.post('/auth/signup', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password
+    });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(201).json({
+      message: 'Signup successful',
+      user: data.user
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+    if (error) {
+      return res.status(401).json({ error: 'Invalid login credentials' });
+    }
+    res.status(200).json({
+      user: data.user,
+      session: data.session
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.get('/tasks', async (req, res) => {
