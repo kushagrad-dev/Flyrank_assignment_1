@@ -54,15 +54,11 @@ async function fetchWithCache(url) {
 function extractBookLinks(html, pageUrl) {
   const $ = cheerio.load(html);
   const links = [];
-
   $('article.product_pod h3 a').each((_, el) => {
     const href = $(el).attr('href');
-    // href is relative like ../../../book-name/index.html
-    // resolve against the catalogue base
     const absolute = new URL(href, pageUrl).href;
     links.push(absolute);
   });
-
   return links;
 }
 
@@ -73,36 +69,71 @@ function extractNextPage(html, pageUrl) {
   return new URL(nextHref, pageUrl).href;
 }
 
+function extractBookDetail(html, productUrl, sourcePageUrl) {
+  const $ = cheerio.load(html);
+
+  const title = $('div.product_main h1').text().trim();
+  const price_text = $('div.product_main p.price_color').text().trim();
+  const availability_text = $('div.product_main p.availability').text().trim();
+  const rating_text = $('div.product_main p.star-rating').attr('class').replace('star-rating', '').trim();
+
+  // description is inside #product_description ~ p
+  const descEl = $('#product_description ~ p').first();
+  const description = descEl.length ? descEl.text().trim() : null;
+
+  return {
+    title,
+    product_url: productUrl,
+    price_text,
+    availability_text,
+    rating_text,
+    description,
+    source_page: sourcePageUrl,
+    fetched_at: new Date().toISOString()
+  };
+}
+
 async function crawlCatalogue() {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
 
   let currentUrl = CATALOGUE_PAGE_1;
   let cataloguePageCount = 0;
   const allBookLinks = [];
+  const sourcePageMap = {};
 
   while (currentUrl && cataloguePageCount < 3) {
     const html = await fetchWithCache(currentUrl);
-    cataloguePageCount++;
-
     const links = extractBookLinks(html, currentUrl);
+    links.forEach(link => { sourcePageMap[link] = currentUrl; });
     allBookLinks.push(...links);
-
-    const nextUrl = extractNextPage(html, currentUrl);
-    currentUrl = nextUrl;
+    cataloguePageCount++;
+    currentUrl = extractNextPage(html, currentUrl);
   }
 
-  // deduplicate
   const uniqueUrls = [...new Set(allBookLinks)];
+  console.log(`\ncatalogue_pages=${cataloguePageCount}, discovered=${allBookLinks.length}, unique_urls=${uniqueUrls.length}`);
+  return { uniqueUrls, sourcePageMap };
+}
 
-  console.log(`\ncatalogue_pages=${cataloguePageCount}`);
-  console.log(`discovered=${allBookLinks.length}`);
-  console.log(`unique_urls=${uniqueUrls.length}`);
+async function scrapeBooks(uniqueUrls, sourcePageMap) {
+  const rawRecords = [];
 
-  return uniqueUrls;
+  for (const url of uniqueUrls) {
+    const html = await fetchWithCache(url);
+    const record = extractBookDetail(html, url, sourcePageMap[url]);
+    rawRecords.push(record);
+  }
+
+  console.log(`\ndetail_pages=${rawRecords.length}`);
+  console.log('\nSample record:');
+  console.log(JSON.stringify(rawRecords[0], null, 2));
+
+  return rawRecords;
 }
 
 async function main() {
-  await crawlCatalogue();
+  const { uniqueUrls, sourcePageMap } = await crawlCatalogue();
+  await scrapeBooks(uniqueUrls, sourcePageMap);
 }
 
 main().catch(err => {
