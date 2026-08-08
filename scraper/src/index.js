@@ -11,6 +11,8 @@ const USER_AGENT = 'FlyRankInternshipA9/1.0 (+https://github.com/kushagrad-dev/F
 const TIMEOUT_MS = 10000;
 const DELAY_MS = 500;
 
+
+
 // --- Schema ---
 const BookSchema = z.object({
   title: z.string().min(1),
@@ -37,8 +39,7 @@ async function fetchWithCache(url) {
 
   if (fs.existsSync(cacheFile)) {
     const html = fs.readFileSync(cacheFile, 'utf-8');
-    console.log(`CACHE HIT  ${url} (${html.length} bytes)`);
-    return html;
+    return { html, cacheHit: true };
   }
 
   await sleep(DELAY_MS);
@@ -56,14 +57,31 @@ async function fetchWithCache(url) {
     clearTimeout(timer);
   }
 
+  if (response.status === 404) {
+    throw new Error(`404 NOT FOUND: ${url}`);
+  }
+
+  if (response.status === 403) {
+    throw new Error(`403 FORBIDDEN: ${url}`);
+  }
+
   if (response.status !== 200) {
-    throw new Error(`Bad status ${response.status} for ${url}`);
+    // retry once for 5xx errors
+    await sleep(DELAY_MS * 2);
+    const retryResponse = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT }
+    });
+    if (retryResponse.status !== 200) {
+      throw new Error(`Bad status ${retryResponse.status} after retry: ${url}`);
+    }
+    const html = await retryResponse.text();
+    fs.writeFileSync(path.join(CACHE_DIR, getCacheFilename(url)), html, 'utf-8');
+    return { html, cacheHit: false };
   }
 
   const html = await response.text();
-  fs.writeFileSync(cacheFile, html, 'utf-8');
-  console.log(`FETCH      ${url} (${html.length} bytes)`);
-  return html;
+  fs.writeFileSync(path.join(CACHE_DIR, getCacheFilename(url)), html, 'utf-8');
+  return { html, cacheHit: false };
 }
 
 function extractBookLinks(html, pageUrl) {
@@ -93,8 +111,6 @@ function extractBookDetail(html, productUrl, sourcePageUrl) {
   const rating_text = $('div.product_main p.star-rating').attr('class').replace('star-rating', '').trim();
   const descEl = $('#product_description ~ p').first();
   const description = descEl.length ? descEl.text().trim() : null;
-
-  // clean price: strip £ and any whitespace, parse as float
   const price_gbp = parseFloat(price_text.replace(/[^0-9.]/g, ''));
 
   return {
@@ -110,7 +126,7 @@ function extractBookDetail(html, productUrl, sourcePageUrl) {
   };
 }
 
-async function crawlCatalogue() {
+async function crawlCatalogue(stats) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
 
   let currentUrl = CATALOGUE_PAGE_1;
@@ -119,7 +135,8 @@ async function crawlCatalogue() {
   const sourcePageMap = {};
 
   while (currentUrl && cataloguePageCount < 3) {
-    const html = await fetchWithCache(currentUrl);
+    const { html, cacheHit } = await fetchWithCache(currentUrl);
+    if (cacheHit) stats.cacheHits++; else stats.pagesFetched++;
     const links = extractBookLinks(html, currentUrl);
     links.forEach(link => { sourcePageMap[link] = currentUrl; });
     allBookLinks.push(...links);
@@ -128,11 +145,11 @@ async function crawlCatalogue() {
   }
 
   const uniqueUrls = [...new Set(allBookLinks)];
-  console.log(`\ncatalogue_pages=${cataloguePageCount}, discovered=${allBookLinks.length}, unique_urls=${uniqueUrls.length}`);
+  console.log(`catalogue_pages=${cataloguePageCount}, discovered=${allBookLinks.length}, unique_urls=${uniqueUrls.length}`);
   return { uniqueUrls, sourcePageMap };
 }
 
-async function scrapeAndValidate(uniqueUrls, sourcePageMap) {
+async function scrapeAndValidate(uniqueUrls, sourcePageMap, stats) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
   const goodRecords = [];
@@ -140,44 +157,79 @@ async function scrapeAndValidate(uniqueUrls, sourcePageMap) {
   const seenUrls = new Set();
 
   for (const url of uniqueUrls) {
-    // idempotency: skip duplicates
     if (seenUrls.has(url)) continue;
     seenUrls.add(url);
 
-    const html = await fetchWithCache(url);
-    const raw = extractBookDetail(html, url, sourcePageMap[url]);
+    try {
+      const { html, cacheHit } = await fetchWithCache(url);
+      if (cacheHit) stats.cacheHits++; else stats.pagesFetched++;
 
-    const result = BookSchema.safeParse(raw);
-    if (result.success) {
-      goodRecords.push(result.data);
-    } else {
-      errorRecords.push({ url, reason: result.error.message, raw });
+      const raw = extractBookDetail(html, url, sourcePageMap[url]);
+      const result = BookSchema.safeParse(raw);
+
+      if (result.success) {
+        goodRecords.push(result.data);
+      } else {
+        stats.invalidRecords++;
+        errorRecords.push({ url, reason: result.error.message, raw });
+      }
+    } catch (err) {
+      console.error(`FAILED     ${url} — ${err.message}`);
+      stats.failedPages++;
+      errorRecords.push({ url, reason: err.message });
     }
   }
 
-  // write good records
-  fs.writeFileSync(
-    path.join(OUTPUT_DIR, 'books.json'),
-    JSON.stringify(goodRecords, null, 2),
-    'utf-8'
-  );
+  // idempotent write — deduplicate by product_url
+  const existingRecords = fs.existsSync(path.join(OUTPUT_DIR, 'books.json'))
+    ? JSON.parse(fs.readFileSync(path.join(OUTPUT_DIR, 'books.json'), 'utf-8'))
+    : [];
 
-  // write errors
-  fs.writeFileSync(
-    path.join(OUTPUT_DIR, 'errors.json'),
-    JSON.stringify(errorRecords, null, 2),
-    'utf-8'
-  );
+  const existingMap = new Map(existingRecords.map(r => [r.product_url, r]));
+  goodRecords.forEach(r => existingMap.set(r.product_url, r));
+  const finalRecords = [...existingMap.values()];
 
-  console.log(`\nvalid=${goodRecords.length}, invalid=${errorRecords.length}`);
-  console.log(`books.json written with ${goodRecords.length} records`);
+  fs.writeFileSync(path.join(OUTPUT_DIR, 'books.json'), JSON.stringify(finalRecords, null, 2), 'utf-8');
+  fs.writeFileSync(path.join(OUTPUT_DIR, 'errors.json'), JSON.stringify(errorRecords, null, 2), 'utf-8');
+
+  console.log(`valid=${goodRecords.length}, invalid=${stats.invalidRecords}, failed=${stats.failedPages}`);
+  console.log(`books.json written with ${finalRecords.length} records`);
 
   return { goodRecords, errorRecords };
 }
 
 async function main() {
-  const { uniqueUrls, sourcePageMap } = await crawlCatalogue();
-  await scrapeAndValidate(uniqueUrls, sourcePageMap);
+  const startTime = new Date();
+
+  const stats = {
+    pagesFetched: 0,
+    cacheHits: 0,
+    invalidRecords: 0,
+    failedPages: 0
+  };
+
+  const { uniqueUrls, sourcePageMap } = await crawlCatalogue(stats);
+  uniqueUrls.push(FAKE_URL);
+  sourcePageMap[FAKE_URL] = CATALOGUE_PAGE_1;
+  const { goodRecords, errorRecords } = await scrapeAndValidate(uniqueUrls, sourcePageMap, stats);
+
+  const endTime = new Date();
+  const runReport = {
+    start_time: startTime.toISOString(),
+    end_time: endTime.toISOString(),
+    duration_seconds: ((endTime - startTime) / 1000).toFixed(2),
+    pages_fetched: stats.pagesFetched,
+    cache_hits: stats.cacheHits,
+    valid_records: goodRecords.length,
+    invalid_records: stats.invalidRecords,
+    failed_pages: stats.failedPages
+  };
+
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(path.join(OUTPUT_DIR, 'run-report.json'), JSON.stringify(runReport, null, 2), 'utf-8');
+
+  console.log('\nRun report:');
+  console.log(JSON.stringify(runReport, null, 2));
 }
 
 main().catch(err => {
