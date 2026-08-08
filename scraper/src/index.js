@@ -1,13 +1,28 @@
 const fs = require('fs');
 const path = require('path');
 const cheerio = require('cheerio');
+const { z } = require('zod');
 
 const BASE_URL = 'https://books.toscrape.com';
 const CATALOGUE_PAGE_1 = `${BASE_URL}/catalogue/page-1.html`;
 const CACHE_DIR = path.join(__dirname, '..', 'cache');
+const OUTPUT_DIR = path.join(__dirname, '..', 'output');
 const USER_AGENT = 'FlyRankInternshipA9/1.0 (+https://github.com/kushagrad-dev/Flyrank_assignment_1)';
 const TIMEOUT_MS = 10000;
 const DELAY_MS = 500;
+
+// --- Schema ---
+const BookSchema = z.object({
+  title: z.string().min(1),
+  product_url: z.string().url(),
+  price_text: z.string(),
+  price_gbp: z.number(),
+  availability_text: z.string(),
+  rating_text: z.string(),
+  description: z.string().nullable(),
+  source_page: z.string().url(),
+  fetched_at: z.string()
+});
 
 function getCacheFilename(url) {
   return url.replace(/https?:\/\//, '').replace(/[^a-z0-9]/gi, '_') + '.html';
@@ -76,15 +91,17 @@ function extractBookDetail(html, productUrl, sourcePageUrl) {
   const price_text = $('div.product_main p.price_color').text().trim();
   const availability_text = $('div.product_main p.availability').text().trim();
   const rating_text = $('div.product_main p.star-rating').attr('class').replace('star-rating', '').trim();
-
-  // description is inside #product_description ~ p
   const descEl = $('#product_description ~ p').first();
   const description = descEl.length ? descEl.text().trim() : null;
+
+  // clean price: strip £ and any whitespace, parse as float
+  const price_gbp = parseFloat(price_text.replace(/[^0-9.]/g, ''));
 
   return {
     title,
     product_url: productUrl,
     price_text,
+    price_gbp,
     availability_text,
     rating_text,
     description,
@@ -115,25 +132,52 @@ async function crawlCatalogue() {
   return { uniqueUrls, sourcePageMap };
 }
 
-async function scrapeBooks(uniqueUrls, sourcePageMap) {
-  const rawRecords = [];
+async function scrapeAndValidate(uniqueUrls, sourcePageMap) {
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+  const goodRecords = [];
+  const errorRecords = [];
+  const seenUrls = new Set();
 
   for (const url of uniqueUrls) {
+    // idempotency: skip duplicates
+    if (seenUrls.has(url)) continue;
+    seenUrls.add(url);
+
     const html = await fetchWithCache(url);
-    const record = extractBookDetail(html, url, sourcePageMap[url]);
-    rawRecords.push(record);
+    const raw = extractBookDetail(html, url, sourcePageMap[url]);
+
+    const result = BookSchema.safeParse(raw);
+    if (result.success) {
+      goodRecords.push(result.data);
+    } else {
+      errorRecords.push({ url, reason: result.error.message, raw });
+    }
   }
 
-  console.log(`\ndetail_pages=${rawRecords.length}`);
-  console.log('\nSample record:');
-  console.log(JSON.stringify(rawRecords[0], null, 2));
+  // write good records
+  fs.writeFileSync(
+    path.join(OUTPUT_DIR, 'books.json'),
+    JSON.stringify(goodRecords, null, 2),
+    'utf-8'
+  );
 
-  return rawRecords;
+  // write errors
+  fs.writeFileSync(
+    path.join(OUTPUT_DIR, 'errors.json'),
+    JSON.stringify(errorRecords, null, 2),
+    'utf-8'
+  );
+
+  console.log(`\nvalid=${goodRecords.length}, invalid=${errorRecords.length}`);
+  console.log(`books.json written with ${goodRecords.length} records`);
+
+  return { goodRecords, errorRecords };
 }
 
 async function main() {
   const { uniqueUrls, sourcePageMap } = await crawlCatalogue();
-  await scrapeBooks(uniqueUrls, sourcePageMap);
+  await scrapeAndValidate(uniqueUrls, sourcePageMap);
 }
 
 main().catch(err => {
